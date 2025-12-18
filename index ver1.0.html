@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Christmas Gifts & Lights</title>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            /* page background image (file: ./img/tải xuống.jpg) with dark overlay so scene remains readable */
+            background-image: linear-gradient(rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.35)), url('./img/tải xuống.jpg');
+            background-color: #000000;
+            background-size: cover;
+            background-position: center center;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        
+        #canvas-container {
+            width: 100%;
+            height: 100vh;
+            display: block;
+        }
+        
+        #ui-layer {
+            position: absolute;
+            bottom: 30px;
+            width: 100%;
+            text-align: center;
+            pointer-events: none;
+            z-index: 100;
+        }
+        
+        .badge {
+            display: inline-block;
+            background: rgba(0, 0, 0, 0.7);
+            border: 2px solid #FFD700;
+            color: #FFD700;
+            padding: 10px 25px;
+            border-radius: 50px;
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            box-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+            text-shadow: 0 0 10px #FFD700;
+        }
+        
+        .guide {
+            color: #ccc;
+            font-size: 13px;
+            margin-bottom: 20px;
+            text-shadow: 0 2px 4px black;
+        }
+        
+        button {
+            pointer-events: auto;
+            cursor: pointer;
+            background: linear-gradient(to bottom, #D32F2F, #8B0000);
+            color: #FFF;
+            border: 2px solid #FFD700;
+            padding: 15px 50px;
+            border-radius: 30px;
+            font-weight: 800;
+            font-size: 16px;
+            box-shadow: 0 0 30px rgba(255, 0, 0, 0.6);
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.05);
+            }
+            100% {
+                transform: scale(1);
+            }
+        }
+        
+        #camera-preview {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            width: 120px;
+            height: 90px;
+            border: 2px solid rgba(255, 0, 0, 0.5);
+            transform: scaleX(-1);
+            opacity: 0.6;
+            border-radius: 8px;
+        }
+        
+        #error-log {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            color: red;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 999;
+            padding: 10px;
+        }
+        /* Music control button */
+        
+        #musicBtn {
+            pointer-events: auto;
+            cursor: pointer;
+            background: transparent;
+            color: #FFD700;
+            border: 2px solid #FFD700;
+            padding: 8px 14px;
+            border-radius: 20px;
+            font-size: 16px;
+            margin-left: 10px;
+            box-shadow: 0 0 10px rgba(255, 215, 0, 0.2);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="error-log"></div>
+    <div id="ui-layer">
+        <div id="status" class="badge">🎄 Quà Giáng Sinh của Bé Sâu 🎄</div>
+        <div class="guide">
+            🖐 <b>Xòe:</b> Bung Quà & Đèn &nbsp;|&nbsp; 👌 <b>Pinch:</b> Xem ảnh &nbsp;|&nbsp; ✊ <b>Nắm:</b> Thu cây &nbsp;|&nbsp; 💖 <b>Trái tim:</b> Nhéo ngón (thumb+index) hoặc chạm 2 đầu ngón
+        </div>
+        <button id="btnStart" onclick="startSystem()">BẮT ĐẦU</button>
+        <button id="musicBtn" onclick="toggleMusic()" title="Bật nhạc">🔈</button>
+    </div>
+
+    <div id="canvas-container"></div>
+    <video class="input_video" style="display:none"></video>
+    <canvas id="camera-preview"></canvas>
+
+    <script>
+        // ==========================================
+        // 1. Vandiep
+        // ==========================================
+        // Place a music file at ./img/christmas.mp3 or update MUSIC_URL to your desired audio file
+        const MUSIC_URL = "./Nhajc.mp3";
+        let bgMusic = new Audio(MUSIC_URL);
+        bgMusic.loop = true;
+        bgMusic.volume = 0.8;
+        bgMusic.preload = 'auto';
+
+        function updateMusicBtn() {
+            const btn = document.getElementById('musicBtn');
+            if (!btn) return;
+            btn.innerText = bgMusic.paused ? '🔈' : '🔊';
+            btn.title = bgMusic.paused ? 'Bật nhạc' : 'Tắt nhạc';
+        }
+
+        function toggleMusic() {
+            if (bgMusic.paused) {
+                bgMusic.play().catch(e => console.log(e));
+            } else {
+                bgMusic.pause();
+            }
+            updateMusicBtn();
+        }
+
+        window.addEventListener('load', () => updateMusicBtn());
+
+        const loader = new THREE.TextureLoader();
+        const photoFiles = [
+            './img/20241220_214921_557.png',
+            './img/20250307_122750_591.jpg',
+            './img/Locket_1736954446790_0.webp',
+            './img/Locket_1736954463815_82.webp',
+            './img/retouch_2025070418012052.jpg'
+        ];
+        const photoTextures = [];
+        // load textures with error fallback placeholder
+        photoFiles.forEach((f, i) => {
+            loader.load(f,
+                tex => photoTextures[i] = tex,
+                undefined,
+                err => {
+                    console.warn('Failed to load', f, err);
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 512;
+                    canvas.height = 512;
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = '#333';
+                    ctx.fillRect(0, 0, 512, 512);
+                    ctx.fillStyle = '#FFD700';
+                    ctx.font = '36px sans-serif';
+                    ctx.fillText('Image not found', 40, 260);
+                    photoTextures[i] = new THREE.CanvasTexture(canvas);
+                }
+            );
+        });
+
+        // --- Vandiep ---
+        function createCustomTexture(type) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            const cx = 64,
+                cy = 64;
+
+            if (type === 'gold_glow') {
+                // Vandiep
+                const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, 40);
+                grd.addColorStop(0, '#FFFFFF');
+                grd.addColorStop(0.2, '#FFFFE0');
+                grd.addColorStop(0.5, '#FFD700');
+                grd.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = grd;
+                ctx.fillRect(0, 0, 128, 128);
+
+            } else if (type === 'red_light') {
+                // Vandiep
+                const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, 50);
+                grd.addColorStop(0, '#FFAAAA');
+                grd.addColorStop(0.3, '#FF0000');
+                grd.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = grd;
+                ctx.fillRect(0, 0, 128, 128);
+
+            } else if (type === 'gift_red') {
+                // Vandiep
+                ctx.fillStyle = '#D32F2F'; // Vandiep
+                ctx.fillRect(20, 20, 88, 88);
+                ctx.fillStyle = '#FFD700'; // Vandiep
+                ctx.fillRect(54, 20, 20, 88); // Vandiep
+                ctx.fillRect(20, 54, 88, 20); // Vandiep
+                // Vandiep
+                ctx.strokeStyle = "rgba(0,0,0,0.3)";
+                ctx.lineWidth = 2;
+                ctx.strokeRect(20, 20, 88, 88);
+            }
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        const textures = {
+            gold: createCustomTexture('gold_glow'),
+            red: createCustomTexture('red_light'),
+            gift: createCustomTexture('gift_red')
+        };
+
+        // ==========================================
+        // 2. Vandiep
+        // ==========================================
+        const CONFIG = {
+            // reduced counts to improve performance on lower-end devices
+            goldCount: 1200, // Hạt vàng
+            redCount: 180, // Số lượng đèn đỏ
+            giftCount: 80, // Số lượng hộp quà
+            explodeRadius: 65,
+            photoOrbitRadius: 25,
+            treeHeight: 70,
+            treeBaseRadius: 35
+        };
+
+        // avoid frames becoming ridiculously large if an image has abnormal dimensions
+        const MAX_FRAME_WIDTH = 40;
+
+        // frame texture metadata
+        let FRAME_INNER_RATIO = 1.0; // inner transparent hole ratio of the frame canvas (computed at runtime)
+        let FRAME_TEX = null;
+
+        let scene, camera, renderer;
+        let groupGold, groupRed, groupGift; // Vandiep
+        let photoMeshes = [];
+        let titleMesh, starMesh;
+
+        let state = 'TREE';
+        let selectedIndex = 0;
+        let handX = 0.5;
+
+        // Swipe / drag state for photo browsing
+        let isDragging = false;
+        let dragStartX = 0;
+        let dragDeltaX = 0; // in pixels
+        let dragOffset = 0; // transformed into 3D space (units)
+        const DRAG_THRESHOLD = 80; // px to trigger a change
+        const MAX_DRAG_OFFSET = 60; // max 3D offset for visual feedback
+
+        // Push gesture detection (open-hand swiping)
+        let lastHandX = 0;
+        let lastHandTime = performance.now();
+        const PUSH_VEL_THRESHOLD = 1.0; // velocity threshold (hand's x units per second). Tune as needed.
+        const PUSH_COOLDOWN = 700; // ms between recognized push gestures
+        let lastPushTime = 0;
+
+
+        let lastFrameTime = performance.now();
+
+        function changeSelectedIndex(dir) {
+            const n = photoMeshes.length;
+            selectedIndex = (selectedIndex + dir + n) % n;
+        }
+
+        // ==========================================
+        // 3. Vandiep
+        // ==========================================
+        function init3D() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x000000, 0.002);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 100;
+
+            // make renderer transparent so the page background image is visible behind the WebGL canvas
+            renderer = new THREE.WebGLRenderer({
+                antialias: true,
+                alpha: true
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setClearColor(0x000000, 0); // fully transparent
+            container.appendChild(renderer.domElement);
+
+            // Vandiep
+            groupGold = createParticleSystem('gold', CONFIG.goldCount, 2.0);
+            groupRed = createParticleSystem('red', CONFIG.redCount, 3.5); // Vandiep
+            groupGift = createParticleSystem('gift', CONFIG.giftCount, 3.0); // Vandiep
+
+            createPhotos();
+            createDecorations();
+            animate();
+        }
+
+        function createParticleSystem(type, count, size) {
+            const pPositions = [];
+            const pExplodeTargets = [];
+            const pTreeTargets = [];
+            const sizes = [];
+            const phases = [];
+
+            for (let i = 0; i < count; i++) {
+                // --- TREE Vandiep ---
+                const h = Math.random() * CONFIG.treeHeight;
+                const y = h - CONFIG.treeHeight / 2;
+                let radiusRatio = (type === 'gold') ? Math.sqrt(Math.random()) : 0.9 + Math.random() * 0.1;
+                const maxR = (1 - (h / CONFIG.treeHeight)) * CONFIG.treeBaseRadius;
+                const r = maxR * radiusRatio;
+                const theta = Math.random() * Math.PI * 2;
+                pTreeTargets.push(r * Math.cos(theta), y, r * Math.sin(theta));
+
+                // --- EXPLODE Vandiep ---
+                const u = Math.random();
+                const v = Math.random();
+                const phi = Math.acos(2 * v - 1);
+                const lam = 2 * Math.PI * u;
+                let radMult = (type === 'gift') ? 1.2 : 1.0;
+                const rad = CONFIG.explodeRadius * Math.cbrt(Math.random()) * radMult;
+                pExplodeTargets.push(rad * Math.sin(phi) * Math.cos(lam), rad * Math.sin(phi) * Math.sin(lam), rad * Math.cos(phi));
+
+                // (removed)
+
+                // --- INIT Vandiep ---
+                pPositions.push(pTreeTargets[i * 3], pTreeTargets[i * 3 + 1], pTreeTargets[i * 3 + 2]);
+                sizes.push(size);
+                phases.push(Math.random() * Math.PI * 2);
+            }
+
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pPositions, 3));
+            geo.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
+
+            // Init colors Vandiep
+            const colors = new Float32Array(count * 3);
+            const baseColor = new THREE.Color();
+            if (type === 'gold') baseColor.setHex(0xFFD700);
+            else if (type === 'red') baseColor.setHex(0xFF0000);
+            else baseColor.setHex(0xFFFFFF);
+
+            for (let i = 0; i < count; i++) {
+                colors[i * 3] = baseColor.r;
+                colors[i * 3 + 1] = baseColor.g;
+                colors[i * 3 + 2] = baseColor.b;
+            }
+            geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            geo.userData = {
+                tree: pTreeTargets,
+                explode: pExplodeTargets,
+                phases: phases,
+                baseColor: baseColor,
+                baseSize: size
+            };
+
+            const mat = new THREE.PointsMaterial({
+                size: size,
+                map: textures[type],
+                transparent: true,
+                opacity: 1.0,
+                vertexColors: true,
+                blending: (type === 'gift') ? THREE.NormalBlending : THREE.AdditiveBlending,
+                depthWrite: false,
+                sizeAttenuation: true
+            });
+
+            const points = new THREE.Points(geo, mat);
+            scene.add(points);
+            return points;
+        }
+
+        function makeFrameCanvas() {
+            // create a hollow rounded frame: filled outer rect then clear inner rect so center remains fully transparent
+            const size = 1024;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, size, size);
+
+            // parameters
+            const stroke = Math.floor(size * 0.04); // thickness of frame
+            const radius = Math.floor(size * 0.03);
+
+            // draw outer rounded rect (filled)
+            function roundRect(cx, cy, rw, rh, rr) {
+                ctx.beginPath();
+                ctx.moveTo(cx + rr, cy);
+                ctx.arcTo(cx + rw, cy, cx + rw, cy + rh, rr);
+                ctx.arcTo(cx + rw, cy + rh, cx, cy + rh, rr);
+                ctx.arcTo(cx, cy + rh, cx, cy, rr);
+                ctx.arcTo(cx, cy, cx + rw, cy, rr);
+                ctx.closePath();
+            }
+
+            const outerPad = 0;
+            roundRect(outerPad, outerPad, size - outerPad * 2, size - outerPad * 2, radius);
+            ctx.fillStyle = '#FFD700';
+            ctx.fill();
+
+            // clear inner rounded rect to make hollow center
+            const innerPad = Math.floor(stroke * 1.2); // inset for transparent center
+            ctx.globalCompositeOperation = 'destination-out';
+            roundRect(innerPad, innerPad, size - innerPad * 2, size - innerPad * 2, Math.max(2, radius - Math.floor(stroke * 0.3)));
+            ctx.fill();
+            ctx.globalCompositeOperation = 'source-over';
+
+            // compute inner ratio: inner area size / canvas size
+            const innerSize = size - innerPad * 2;
+            const innerRatio = innerSize / size;
+            return {
+                canvas,
+                innerRatio
+            };
+        }
+
+        function createPhotos() {
+            // Use 1x1 plane and control size via userData.baseScale so aspect ratio is preserved
+            const geo = new THREE.PlaneGeometry(1, 1);
+            const borderGeo = new THREE.PlaneGeometry(1.02, 1.02);
+            // create frame texture once and store its inner hole ratio for correct sizing
+            const frameDef = makeFrameCanvas();
+            FRAME_TEX = new THREE.CanvasTexture(frameDef.canvas);
+            FRAME_INNER_RATIO = frameDef.innerRatio || 1.0;
+            const frameMat = new THREE.MeshBasicMaterial({
+                map: FRAME_TEX,
+                transparent: true,
+                side: THREE.DoubleSide,
+                depthTest: false,
+                depthWrite: false
+            });
+
+            const baseHeight = 8;
+            for (let i = 0; i < photoFiles.length; i++) {
+                const mat = new THREE.MeshBasicMaterial({
+                    map: photoTextures[i] || null,
+                    side: THREE.DoubleSide
+                });
+                const mesh = new THREE.Mesh(geo, mat);
+                // each border uses a cloned material (same texture)
+                const border = new THREE.Mesh(borderGeo, frameMat.clone());
+                // render behind the photo so the frame does not cover the image interior
+                border.position.z = -0.01;
+                mesh.add(border);
+
+                // compute baseScale from texture if available, otherwise default square
+                let w = baseHeight,
+                    h = baseHeight;
+                const tex = photoTextures[i];
+                if (tex && tex.image && tex.image.width && tex.image.height && tex.image.height > 0) {
+                    let aspect = tex.image.width / tex.image.height;
+                    const clamped = Math.max(0.4, Math.min(2.5, aspect));
+                    if (clamped !== aspect) console.warn('Clamped aspect ratio for', photoFiles[i], 'from', aspect, 'to', clamped);
+                    aspect = clamped;
+                    w = baseHeight * aspect;
+                    h = baseHeight;
+                }
+
+                // cap maximum frame width
+                if (w > MAX_FRAME_WIDTH) {
+                    console.warn('Capping frame width for', photoFiles[i], 'from', w, 'to', MAX_FRAME_WIDTH);
+                    w = MAX_FRAME_WIDTH;
+                }
+
+                mesh.userData.baseScale = new THREE.Vector3(w, h, 1);
+                const borderW = Math.min(w * 1.03, MAX_FRAME_WIDTH * 1.05);
+                const borderH = Math.min(h * 1.03, MAX_FRAME_WIDTH * 1.05);
+                // set border scale relative to the mesh base size so when mesh.scale changes, border matches perfectly
+                const holeRatio = FRAME_INNER_RATIO || 1.0;
+                border.scale.set((borderW / w) / holeRatio, (borderH / h) / holeRatio, 1);
+
+                mesh.visible = false;
+                mesh.scale.set(0, 0, 0);
+                scene.add(mesh);
+                photoMeshes.push(mesh);
+            }
+        }
+
+        function createDecorations() {
+            // Vandiep
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            ctx.font = 'bold italic 90px "Times New Roman"';
+            ctx.fillStyle = '#FFD700';
+            ctx.textAlign = 'center';
+            ctx.shadowColor = "#FF0000";
+            ctx.shadowBlur = 40;
+            ctx.fillText("MERRY CHRISTMAS", 512, 130);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            const mat = new THREE.MeshBasicMaterial({
+                map: tex,
+                transparent: true,
+                blending: THREE.AdditiveBlending
+            });
+            titleMesh = new THREE.Mesh(new THREE.PlaneGeometry(60, 15), mat);
+            titleMesh.position.set(0, 50, 0);
+            scene.add(titleMesh);
+
+            // Vandiep
+            const starCanvas = document.createElement('canvas');
+            starCanvas.width = 128;
+            starCanvas.height = 128;
+            const sCtx = starCanvas.getContext('2d');
+            sCtx.fillStyle = "#FFFF00";
+            sCtx.shadowColor = "#FFF";
+            sCtx.shadowBlur = 20;
+            sCtx.beginPath();
+            const cx = 64,
+                cy = 64,
+                outer = 50,
+                inner = 20;
+            for (let i = 0; i < 5; i++) {
+                sCtx.lineTo(cx + Math.cos((18 + i * 72) / 180 * Math.PI) * outer, cy - Math.sin((18 + i * 72) / 180 * Math.PI) * outer);
+                sCtx.lineTo(cx + Math.cos((54 + i * 72) / 180 * Math.PI) * inner, cy - Math.sin((54 + i * 72) / 180 * Math.PI) * inner);
+            }
+            sCtx.closePath();
+            sCtx.fill();
+            const starTex = new THREE.CanvasTexture(starCanvas);
+            const starMat = new THREE.MeshBasicMaterial({
+                map: starTex,
+                transparent: true,
+                blending: THREE.AdditiveBlending
+            });
+            starMesh = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), starMat);
+            starMesh.position.set(0, CONFIG.treeHeight / 2 + 2, 0);
+            scene.add(starMesh);
+        }
+
+        function updateParticleGroup(group, type, targetState, speed, handRotY, time, heavyAllowed) {
+            const positions = group.geometry.attributes.position.array;
+            const sizesAttr = group.geometry.attributes.size;
+            const sizes = sizesAttr ? sizesAttr.array : null;
+            const colorsAttr = group.geometry.attributes.color;
+            const colors = colorsAttr ? colorsAttr.array : null;
+            const phases = group.geometry.userData.phases || [];
+            const baseColor = group.geometry.userData.baseColor;
+            const baseSize = group.geometry.userData.baseSize;
+
+            const targetKey = (targetState === 'TREE') ? 'tree' : 'explode';
+            const targets = group.geometry.userData[(targetState === 'PHOTO') ? 'explode' : targetKey];
+
+            const count = positions.length / 3;
+
+            // --- Position updates: full or reduced depending on heavyAllowed ---
+            if (heavyAllowed) {
+                for (let i = 0; i < positions.length; i++) {
+                    positions[i] += (targets[i] - positions[i]) * speed;
+                }
+                group.geometry.attributes.position.needsUpdate = true;
+            } else {
+                // Reduced work: frame is slow, skip per-particle position lerps to avoid freezes
+                // do not update positions for this group on slow frames
+            }
+
+            // --- COLOR & SIZE updates ---
+            if (heavyAllowed) {
+                if (targetState === 'TREE') {
+                    group.rotation.y += 0.003;
+                    for (let i = 0; i < count; i++) {
+                        if (sizes) sizes[i] = baseSize;
+                        let brightness = 1.0;
+                        if (type === 'red') {
+                            brightness = 0.5 + 0.5 * Math.sin(time * 3 + phases[i]);
+                        } else if (type === 'gold') {
+                            brightness = 0.8 + 0.4 * Math.sin(time * 10 + phases[i]);
+                        }
+                        if (colors) {
+                            colors[i * 3] = baseColor.r * brightness;
+                            colors[i * 3 + 1] = baseColor.g * brightness;
+                            colors[i * 3 + 2] = baseColor.b * brightness;
+                        }
+                    }
+                    if (colorsAttr) colorsAttr.needsUpdate = true;
+                    if (sizesAttr) sizesAttr.needsUpdate = true;
+
+                    // (removed heavy behavior)
+
+                } else {
+                    // EXPLODE
+                    group.scale.set(1, 1, 1);
+                    group.rotation.y += (handRotY - group.rotation.y) * 0.1;
+                    for (let i = 0; i < count; i++) {
+                        if (sizes) sizes[i] = baseSize;
+                        let brightness = 1.0;
+                        if (type === 'gold' || type === 'red') {
+                            brightness = 0.8 + 0.5 * Math.sin(time * 12 + phases[i]);
+                        }
+                        if (colors) {
+                            colors[i * 3] = baseColor.r * brightness;
+                            colors[i * 3 + 1] = baseColor.g * brightness;
+                            colors[i * 3 + 2] = baseColor.b * brightness;
+                        }
+                    }
+                    if (sizesAttr) sizesAttr.needsUpdate = true;
+                    if (colorsAttr) colorsAttr.needsUpdate = true;
+                }
+            } else {
+                // Reduced updates: only do light transforms to keep visuals responsive
+                if (targetState === 'TREE') {
+                    group.rotation.y += 0.002;
+                } else {
+                    group.rotation.y += (handRotY - group.rotation.y) * 0.05;
+                }
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = Date.now() * 0.001;
+            const speed = 0.06;
+            const handRotY = (handX - 0.5) * 2.5;
+
+            // frame rate and perf check: if frame takes long, reduce heavy updates
+            const nowFrame = performance.now();
+            const frameDt = nowFrame - lastFrameTime;
+            // If a frame takes longer than ~40ms, go into reduced-update mode to avoid freezes
+            const heavyAllowed = frameDt <= 40;
+            lastFrameTime = nowFrame;
+
+            // Vandiep
+            updateParticleGroup(groupGold, 'gold', state, speed, handRotY, time, heavyAllowed);
+            updateParticleGroup(groupRed, 'red', state, speed, handRotY, time, heavyAllowed);
+            updateParticleGroup(groupGift, 'gift', state, speed, handRotY, time, heavyAllowed);
+
+            // Vandiep
+            photoMeshes.forEach((mesh, i) => {
+                if (!mesh.material.map && photoTextures[i]) {
+                    mesh.material.map = photoTextures[i];
+                    mesh.material.needsUpdate = true;
+
+                    // update base scale based on actual image aspect
+                    const img = photoTextures[i].image;
+                    const baseH = 8;
+                    let aspect = (img && img.width && img.height) ? (img.width / img.height) : 1;
+                    // clamp to safe range and guard against zero height
+                    aspect = (img && img.height > 0) ? Math.max(0.4, Math.min(2.5, aspect)) : 1;
+                    if (aspect !== (img.width / img.height)) console.warn('Clamped loaded texture aspect for', photoFiles[i], 'to', aspect);
+                    let w = baseH * aspect;
+                    const h = baseH;
+                    if (w > MAX_FRAME_WIDTH) {
+                        console.warn('Capping loaded frame width for', photoFiles[i], 'from', w, 'to', MAX_FRAME_WIDTH);
+                        w = MAX_FRAME_WIDTH;
+                    }
+                    mesh.userData.baseScale = new THREE.Vector3(w, h, 1);
+                    if (mesh.children[0]) {
+                        const borderW = Math.min(w * 1.03, MAX_FRAME_WIDTH * 1.05);
+                        const borderH = Math.min(h * 1.03, MAX_FRAME_WIDTH * 1.05);
+                        const holeRatio = FRAME_INNER_RATIO || 1.0;
+                        mesh.children[0].scale.set((borderW / w) / holeRatio, (borderH / h) / holeRatio, 1);
+                        mesh.children[0].position.z = -0.01;
+                    }
+                }
+            });
+
+            if (state === 'TREE') {
+                titleMesh.visible = true;
+                starMesh.visible = true;
+                titleMesh.scale.lerp(new THREE.Vector3(1, 1, 1), 0.1);
+                starMesh.rotation.z -= 0.02;
+                photoMeshes.forEach(m => {
+                    m.scale.lerp(new THREE.Vector3(0, 0, 0), 0.1);
+                    m.visible = false;
+                });
+
+            } else if (state === 'EXPLODE') {
+                titleMesh.visible = false;
+                starMesh.visible = false;
+
+                const baseAngle = groupGold.rotation.y;
+                const angleStep = (Math.PI * 2) / 5;
+                let bestIdx = 0;
+                let maxZ = -999;
+
+                photoMeshes.forEach((mesh, i) => {
+                    mesh.visible = true;
+                    const angle = baseAngle + i * angleStep;
+                    const x = Math.sin(angle) * CONFIG.photoOrbitRadius;
+                    const z = Math.cos(angle) * CONFIG.photoOrbitRadius;
+                    const y = Math.sin(time + i) * 3;
+
+                    mesh.position.lerp(new THREE.Vector3(x, y, z), 0.1);
+                    mesh.lookAt(camera.position);
+
+                    if (z > maxZ) {
+                        maxZ = z;
+                        bestIdx = i;
+                    }
+
+
+                    const baseScale = mesh.userData.baseScale ? mesh.userData.baseScale.clone() : new THREE.Vector3(8, 8, 1);
+                    if (z > 5) {
+                        const distScale = 1.0 + (z / CONFIG.photoOrbitRadius) * 0.8;
+                        const target = baseScale.clone().multiplyScalar(distScale);
+                        mesh.scale.lerp(target, 0.1);
+                    } else {
+                        const target = baseScale.clone().multiplyScalar(0.6);
+                        mesh.scale.lerp(target, 0.1);
+                    }
+                });
+                selectedIndex = bestIdx;
+
+            } else if (state === 'PHOTO') {
+                const n = photoMeshes.length;
+                const prevIdx = (selectedIndex - 1 + n) % n;
+                const nextIdx = (selectedIndex + 1) % n;
+
+
+                dragOffset = Math.max(-1, Math.min(1, dragDeltaX / window.innerWidth)) * MAX_DRAG_OFFSET;
+
+                photoMeshes.forEach((mesh, i) => {
+                    const base = mesh.userData.baseScale ? mesh.userData.baseScale.clone() : new THREE.Vector3(8, 8, 1);
+                    if (i === selectedIndex) {
+
+                        mesh.visible = true;
+                        const target = new THREE.Vector3(dragOffset, 0, 60);
+                        mesh.position.lerp(target, 0.15);
+                        mesh.scale.lerp(base.clone().multiplyScalar(5), 0.15);
+                        mesh.lookAt(camera.position);
+                        mesh.rotation.z = THREE.MathUtils.lerp(mesh.rotation.z || 0, dragOffset * 0.003, 0.15);
+                    } else if (i === prevIdx) {
+                        mesh.visible = true;
+                        const baseX = -20;
+                        const target = new THREE.Vector3(baseX + Math.min(0, dragOffset + MAX_DRAG_OFFSET), 0, 55);
+                        mesh.position.lerp(target, 0.15);
+                        mesh.scale.lerp(base.clone().multiplyScalar(3), 0.15);
+                        mesh.lookAt(camera.position);
+                    } else if (i === nextIdx) {
+                        mesh.visible = true;
+                        const baseX = 20;
+                        const target = new THREE.Vector3(baseX + Math.max(0, dragOffset - MAX_DRAG_OFFSET), 0, 55);
+                        mesh.position.lerp(target, 0.15);
+                        mesh.scale.lerp(base.clone().multiplyScalar(3), 0.15);
+                        mesh.lookAt(camera.position);
+                    } else {
+                        mesh.scale.lerp(new THREE.Vector3(0, 0, 0), 0.15);
+                        mesh.visible = false;
+                    }
+                });
+            }
+
+
+
+            renderer.render(scene, camera);
+        }
+
+
+        function attachPointerHandlers() {
+            const canvasEl = renderer.domElement;
+            if (!canvasEl) return;
+            canvasEl.style.touchAction = 'none';
+
+            canvasEl.addEventListener('pointerdown', (ev) => {
+                if (state !== 'PHOTO') return;
+                isDragging = true;
+                dragStartX = ev.clientX;
+                dragDeltaX = 0;
+            });
+
+            window.addEventListener('pointermove', (ev) => {
+                if (!isDragging) return;
+                dragDeltaX = ev.clientX - dragStartX;
+            });
+
+            window.addEventListener('pointerup', (ev) => {
+                if (!isDragging) return;
+                isDragging = false;
+
+                if (Math.abs(dragDeltaX) > DRAG_THRESHOLD) {
+                    if (dragDeltaX < 0) {
+                        changeSelectedIndex(1);
+                    } else {
+                        changeSelectedIndex(-1);
+                    }
+                }
+
+                dragDeltaX = 0;
+                dragOffset = 0;
+            });
+        }
+
+        function startSystem() {
+            document.getElementById('btnStart').style.display = 'none';
+            bgMusic.play().catch(e => console.log(e));
+            updateMusicBtn();
+            init3D();
+
+            attachPointerHandlers();
+
+            const video = document.getElementsByClassName('input_video')[0];
+            const canvas = document.getElementById('camera-preview');
+            const ctx = canvas.getContext('2d');
+            const statusDiv = document.getElementById('status');
+
+            let frameCnt = 0;
+            const hands = new Hands({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+            });
+            hands.setOptions({
+                maxNumHands: 2,
+                modelComplexity: 0,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            hands.onResults(results => {
+                ctx.clearRect(0, 0, 100, 75);
+                ctx.drawImage(results.image, 0, 0, 100, 75);
+
+                const now = performance.now();
+
+
+
+
+                if (results.multiHandLandmarks.length > 0) {
+                    const lm = results.multiHandLandmarks[0];
+                    handX = lm[9].x;
+
+                    const tips = [8, 12, 16, 20];
+                    const wrist = lm[0];
+                    let openDist = 0;
+                    tips.forEach(i => openDist += Math.hypot(lm[i].x - wrist.x, lm[i].y - wrist.y));
+                    const avgDist = openDist / 4;
+                    const pinchDist = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
+
+
+                    const dx = lm[9].x - (lastHandX || lm[9].x);
+                    const dt = Math.max(1, now - lastHandTime) / 1000;
+                    const vx = dx / dt;
+                    lastHandX = lm[9].x;
+                    lastHandTime = now;
+
+                    const isOpen = avgDist >= 0.25;
+                    const pushSpeed = Math.abs(vx);
+
+
+
+                    if (isOpen && pushSpeed > PUSH_VEL_THRESHOLD && (now - lastPushTime) > PUSH_COOLDOWN) {
+                        lastPushTime = now;
+                        if (vx < 0) changeSelectedIndex(1);
+                        else changeSelectedIndex(-1);
+                    }
+
+                    if (isOpen && state === 'PHOTO' && !isDragging) {
+                        dragDeltaX = (lm[9].x - 0.5) * window.innerWidth * 0.6;
+                    }
+
+                    if (avgDist < 0.25) {
+                        state = 'TREE';
+                        statusDiv.innerText = "✊ Thu Cây Thông";
+                        statusDiv.style.color = "#FFD700";
+                    } else if (pinchDist < 0.05) {
+                        state = 'PHOTO';
+                        statusDiv.innerText = "👌 Xem Ảnh";
+                        statusDiv.style.color = "#00FFFF";
+                    } else {
+                        state = 'EXPLODE';
+                        statusDiv.innerText = "🖐 Bung Quà & Ảnh";
+                        statusDiv.style.color = "#FFA500";
+                    }
+                } else {
+                    state = 'TREE';
+                    statusDiv.innerText = "🎄 Giang Sinh An Lanh 🎄";
+                    statusDiv.style.color = "#FFF";
+
+                    if (!isDragging) dragDeltaX = 0;
+                }
+            });
+
+            const cameraUtils = new Camera(video, {
+                onFrame: async() => {
+                    frameCnt++;
+                    if (frameCnt % 3 !== 0) return;
+                    await hands.send({
+                        image: video
+                    });
+                },
+                width: 320,
+                height: 240
+            });
+            cameraUtils.start();
+        }
+
+        window.addEventListener('resize', () => {
+            if (camera) {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        });
+
+
+
+
+
+
+
+        function logError(e) {
+            document.getElementById('error-log').style.display = 'block';
+            document.getElementById('error-log').innerText += e + "\n";
+        }
+    </script>
+</body>
+
+</html>
